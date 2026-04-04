@@ -2,7 +2,7 @@ import { DbConnection } from '/module_bindings/index.js';
 
 const SPACETIMEDB_URI = window.GRIDFORGOOD_URI ?? 'wss://maincloud.spacetimedb.com';
 const DB_NAME = window.GRIDFORGOOD_DB_NAME ?? 'hack';
-const ACTIVE_WINDOW_MICROS = 20_000_000n;
+const ACTIVE_WINDOW_MICROS = 2_000_000n;
 const DEFAULT_PIN_TARGET_HASH = '919c68ff757c3fe518643fbe8424b381ba9e1aaf1eac547a2b7c759a4f687793';
 
 const activeNodesEl = document.getElementById('active-nodes');

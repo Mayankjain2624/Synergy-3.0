@@ -12,6 +12,8 @@ const DEFAULT_IM_MAX = 1.6;
 const DEFAULT_PIN_LENGTH = 6;
 const DEFAULT_PIN_TOTAL_CANDIDATES = 1000000;
 const DEFAULT_PIN_CHUNK_SIZE = 10000;
+const CHUNK_LEASE_TIMEOUT_MICROS = 2_000_000;
+const PIN_CHUNK_LEASE_TIMEOUT_MICROS = 2_000_000;
 
 const ChunkQueue = table(
   {
@@ -163,6 +165,72 @@ function markNodeAlive(ctx: any): void {
     donatedChunks: 0n,
     lastSeenMicros: nowMicros,
   });
+}
+
+function releaseImageChunksForNode(ctx: any, nodeId: any): void {
+  const nowMicros = ctx.timestamp.microsSinceUnixEpoch;
+  for (const chunk of ctx.db.chunkQueue.chunk_queue_by_assigned_node.filter(nodeId)) {
+    if (chunk.status !== 'processing') {
+      continue;
+    }
+
+    ctx.db.chunkQueue.chunkId.update({
+      ...chunk,
+      status: 'pending',
+      assignedNode: undefined,
+      updatedAtMicros: nowMicros,
+    });
+  }
+}
+
+function releasePinChunksForNode(ctx: any, nodeId: any): void {
+  const nowMicros = ctx.timestamp.microsSinceUnixEpoch;
+  for (const chunk of ctx.db.pinChunkQueue.pin_chunk_queue_by_assigned_node.filter(nodeId)) {
+    if (chunk.status !== 'processing') {
+      continue;
+    }
+
+    ctx.db.pinChunkQueue.chunkId.update({
+      ...chunk,
+      status: 'pending',
+      assignedNode: undefined,
+      updatedAtMicros: nowMicros,
+    });
+  }
+}
+
+function reclaimStaleImageChunks(ctx: any): void {
+  const nowMicros = ctx.timestamp.microsSinceUnixEpoch;
+
+  for (const chunk of ctx.db.chunkQueue.chunk_queue_by_status.filter('processing')) {
+    if (nowMicros - chunk.updatedAtMicros <= CHUNK_LEASE_TIMEOUT_MICROS) {
+      continue;
+    }
+
+    ctx.db.chunkQueue.chunkId.update({
+      ...chunk,
+      status: 'pending',
+      assignedNode: undefined,
+      updatedAtMicros: nowMicros,
+    });
+  }
+}
+
+function reclaimStalePinChunks(ctx: any): void {
+  const nowMicros = ctx.timestamp.microsSinceUnixEpoch;
+
+  for (const chunk of ctx.db.pinChunkQueue.pin_chunk_queue_by_status.filter('processing')) {
+    if (nowMicros - chunk.updatedAtMicros <= PIN_CHUNK_LEASE_TIMEOUT_MICROS) {
+      continue;
+    }
+
+    ctx.db.pinChunkQueue.chunkId.update({
+      ...chunk,
+      status: 'pending',
+      assignedNode: undefined,
+      updatedAtMicros: nowMicros,
+    });
+  }
 }
 
 function clearChunkQueue(ctx: any): void {
@@ -364,7 +432,22 @@ export const onConnect = spacetimedb.clientConnected(_ctx => {
 });
 
 export const onDisconnect = spacetimedb.clientDisconnected(_ctx => {
-  // Keep status row; dashboard decides active nodes using a last-seen window.
+  const ctx = _ctx as any;
+  const disconnectedNode = ctx.sender;
+  if (!disconnectedNode) {
+    return;
+  }
+
+  const node = ctx.db.nodeStatus.nodeId.find(disconnectedNode);
+  if (node) {
+    ctx.db.nodeStatus.nodeId.update({
+      ...node,
+      lastSeenMicros: 0n,
+    });
+  }
+
+  releaseImageChunksForNode(ctx, disconnectedNode);
+  releasePinChunksForNode(ctx, disconnectedNode);
 });
 
 export const heartbeat = spacetimedb.reducer(ctx => {
@@ -373,6 +456,7 @@ export const heartbeat = spacetimedb.reducer(ctx => {
 
 export const request_work = spacetimedb.reducer(ctx => {
   markNodeAlive(ctx);
+  reclaimStaleImageChunks(ctx);
 
   for (const inFlight of ctx.db.chunkQueue.chunk_queue_by_assigned_node.filter(
     ctx.sender
@@ -395,6 +479,7 @@ export const request_work = spacetimedb.reducer(ctx => {
 
 export const request_pin_work = spacetimedb.reducer(ctx => {
   markNodeAlive(ctx);
+  reclaimStalePinChunks(ctx);
 
   const pinConfig = ctx.db.pinCrackConfig.id.find(1);
   if (pinConfig?.pinFound) {

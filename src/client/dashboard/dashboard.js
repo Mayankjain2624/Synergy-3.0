@@ -2,7 +2,7 @@ import { DbConnection} from '/module_bindings/index.js';
 
 const SPACETIMEDB_URI = window.GRIDFORGOOD_URI ?? 'wss://maincloud.spacetimedb.com';
 const DB_NAME = window.GRIDFORGOOD_DB_NAME ?? 'hack';
-const ACTIVE_WINDOW_MICROS = 20_000_000n;
+const ACTIVE_WINDOW_MICROS = 2_000_000n;
 
 const canvas = document.getElementById('mandelbrot');
 const context = canvas.getContext('2d');
